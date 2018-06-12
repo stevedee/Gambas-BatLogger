@@ -1,0 +1,21 @@
+To Do
+=====
+
+
+
+
+
+Done
+====
+
+
+---------12 June 2018------------
+Added Sox Volume option as a means of detection. This does not
+work as well as "Frequency Division to GPIO" input method where
+the system counts pulses.
+
+
+
+
+
+

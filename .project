@@ -1,0 +1,12 @@
+# Gambas Project File 3.0
+# Compiled with Gambas 3.5.4
+Title=BatDataLogger
+Startup=FMain
+Icon=bat.png
+Version=0.0.9
+Component=gb.image
+Component=gb.gui
+Component=gb.form
+Component=gb.settings
+TabSize=2
+Packager=1

@@ -1,0 +1,298 @@
+' Gambas class file
+
+'BatDataLogger by Steve Davis
+'Initial version July 2015
+'
+'This runs on a RaspberryPi system which includes a Wolfson audio card and
+'a Bat Detector. The detector provides a Full-Spectrum output in addition to
+'a Frequency Division output. The FD output is used to trigger recording of
+'the Full-Spectrum output.
+'There is an option to trigger the system using SoX Volume, but this is more
+'prone to false triggering.
+'
+'This system needs 20MB of RAM configured as a RAM drive. The system records
+'to this RAM drive and only trnsfers recordings to disk (SD) if they are 
+'classified as having content.
+'
+' 
+Library "/usr/local/lib/libwiringPi"
+
+Public Extern wiringPiSetup() As Integer        'Initialises wiringPi & assumes the calling program uses virtual Pin numbers
+Public Extern pinMode(pin As Integer, pud As Integer)   'sets Pin mode to either INPUT, OUTPUT, (or if applicable; PWM_OUTPUT or GPIO_CLOCK)
+Public Extern digitalRead(pin As Integer) As Integer      'returns the input state (low=0, high=1)
+Public Extern digitalWrite(pin As Integer, value As Integer)
+
+Public Const PIN_OUTPUT As Integer = 1
+Public Const PIN_INPUT As Integer = 0
+Public Const BAT_PIN As Integer = 26
+
+Public blnToggle As Boolean
+Public intCountPeak As Integer
+
+
+Const MAX_LOG_SIZE As Long = 1000000
+' Const THRESHOLD_COUNT As Long = 50          'number of counts in a sample required to initiate recording
+Const LOG_PATH As String = "/home/pi/BatEvent_Log.csv"
+Const AUDIO_PATH As String = "/home/pi/BatCapture"
+Const RAM_PATH As String = "/home/pi/ramstore"
+Const RAM_FILE_1 As String = "BatRec1"      'temp recording #1
+Const RAM_FILE_2 As String = "BatRec2"      'temp recording #2
+Const RAM_FILE_TRIM As String = "BatRecTrimmed.wav"
+Const SOX_THRESHOLD As Float = 21.0           'save file if sox volume is less
+
+Public blnRamFileToggle As Boolean    'toggle recordings between BatRec1 & 2
+
+Public hRecorder As Process
+Public intStartSample As Integer
+Public intEndSample As Integer
+Public intSampleInterval As Integer
+Public intPeakSampleTime As Integer
+Public intIntervalPeak As Integer
+
+
+Public blnDetection As Boolean        'detection via FD output & GPIO input
+Public blnNightTime As Boolean        'true if time => sunset AND time <= sunrise
+
+Public Sub _new()
+
+End
+
+Public Sub Form_Open()
+Dim imgBat As Image
+
+  wiringPiSetup()
+  pinMode(BAT_PIN, PIN_INPUT)  
+  Event(",Starting...")
+  Me.Text = Application.Title & " v" & Application.Version
+  lblStatus.Width = Me.Width
+  tmrSample.Delay = 50
+  tmrStopRecorder.Delay = 10000
+  vbSunrise.Value = Settings["sunrise", "06:00"]
+  vbSunset.Value = Settings["sunset", "20:00"]
+  If Settings["detection"] = "sox" Then
+    rbSoxVolume.Value = True
+  Else
+    rbGPIO.Value = True
+  Endif
+  imgBat = Image.Load(Application.Path & "/batBlue.png")
+  imgView.Image = imgBat
+  imgView.Visible = False  
+  If Not Exist(AUDIO_PATH) Then
+    Mkdir AUDIO_PATH
+  Endif
+  If Not Exist(RAM_PATH) Then
+    Me.Text = "STOP! No RAM directory"
+    Event(Me.Text)
+  Else
+    tmrSample.Start()
+  Endif
+
+Catch
+  Me.Text = "Error: maybe due to wiringPi setup?"
+  Event(Me.Text)
+End
+
+Public Sub Form_Close()
+  
+  If IsProcessRunning("arecord") Then
+    hRecorder.Kill()
+  Endif
+  Settings["sunrise"] = vbSunrise.Value
+  Settings["sunset"] = vbSunset.Value
+  If rbSoxVolume.Value Then
+    Settings["detection"] = "sox"
+  Else
+    Settings["detection"] = "GPIO"
+  Endif
+
+End
+
+
+Public Sub btnRun_Click()
+'reset counters and toggle stop/start the logger
+'
+  tmrSample.Enabled = Not tmrSample.Enabled
+  If tmrSample.Enabled Then
+    Me.Text = "Running..."
+  Else
+    Me.Text = "stopped"
+  Endif
+  Event(Me.Text)
+  intCountPeak = 0
+  intPeakSampleTime = 0
+  intIntervalPeak = 0
+  
+End
+
+Public Function SampleFdSignal() As Boolean
+'sample the signal from a Frequency Division Bat Detector
+'raw ultrasonic signal is divided by 32
+Dim index As Integer
+Dim intState As Integer
+Dim intLastState As Integer
+Dim intCount As Integer
+Dim fTime As Float
+Dim fIntervalTime As Float
+' Dim strAudioFileName As String
+
+  intCount = 0
+  intStartSample = Format(Now(), "ssuu")    'the milliseconds part of time
+  For index = 1 To 20000                'this equates to about 30ms of sampling on a Pi-2
+    intState = digitalRead(BAT_PIN)
+    If intState <> intLastState Then
+      Inc intCount
+    Endif
+    intLastState = intState
+  Next
+  'record time between samples -this is really just diag stuff
+  lblIntervalPk.Text = CStr(intStartSample - intEndSample) & "ms"
+  intEndSample = Format(Now(), "ssuu")   
+  fTime = intEndSample - intStartSample
+  
+  If intCount > slBoxThreshold.Value Then
+    blnDetection = True           'triggers recording via tmrStopRecorder_Timer
+  Endif
+  If intCount > intCountPeak Then
+    intCountPeak = intCount
+  Endif
+  lblFreq.Text = intCount & " / " & intCountPeak
+  lblTotalTime.Text = fTime & "ms"
+  lblSampleInterval.Text = tmrSample.Delay & "ms"
+  If CInt(fTime) > intPeakSampleTime Then
+    intPeakSampleTime = CInt(fTime)
+    lblPkSampleTime.Text = "peak: " & intPeakSampleTime & "ms"
+  Endif  
+End
+
+Public Function Event(strEvent As String) As Boolean
+'Timestamp an event and add to a log
+Dim strFilePath As String
+Dim hFile As File
+Dim strStuff As String
+
+  'Save timestamp & event to ?_Log.csv
+    'Delete the Log file if its getting too big!
+  If Exist(LOG_PATH) Then
+    If Stat(LOG_PATH).Size > MAX_LOG_SIZE Then
+      Kill LOG_PATH
+    Endif
+  Endif
+  
+  Try hFile = Open LOG_PATH For Append
+  If Error Then
+    Return False
+  Else
+    strStuff = Format(Now, "yyyy/mm/dd,hh:nn:ss") & "," & strEvent & Chr(10)
+    Write #hFile, strStuff, Len(strStuff)
+    Close #hFile
+    Return True
+  Endif
+
+Catch
+  message.Error("Oh dear! There seems to be a problem with the logging method: " & Error.Text & "; " & strFilePath, "close")
+End
+
+Public Function IsProcessRunning(strProcess As String) As Boolean
+Dim strReply As String
+  
+  Exec ["pgrep", "-f", "-l", strProcess] Wait To strReply
+  
+  If Split(Trim$(strReply), gb.NewLine).Count > 0 Then
+    Return True
+  Endif
+  
+End
+
+
+Public Sub tmrStopRecorder_Timer()
+'stop recorder when timer times-out (e.g. 10seconds)
+Dim strNewRamFile As String     'next recording to this RAM file
+Dim strOldRamFile As String     'previous recording was to this RAM file
+Dim strDiskFile As String       'saved recording location on SD card
+Dim strSoxVolume As String
+
+  If IsProcessRunning("arecord") Then
+    hRecorder.Kill()
+    lblStatus.Text = "Listening..."
+  Endif
+  blnRamFileToggle = Not blnRamFileToggle
+  If blnRamFileToggle Then
+    strNewRamFile = (RAM_PATH & "/" & RAM_FILE_1)
+    strOldRamFile = (RAM_PATH & "/" & RAM_FILE_2)
+  Else
+    strNewRamFile = (RAM_PATH & "/" & RAM_FILE_2)
+    strOldRamFile = (RAM_PATH & "/" & RAM_FILE_1)
+  Endif
+  'record to RAM file
+  If blnNightTime Then
+    hRecorder = Exec ["arecord", "-t", "wav", "-f", "S16_LE", "-c", "2", "-r", "192000", "-D", "hw:0,0", strNewRamFile]
+  Else
+    lblStatus.Text = "Waiting for darkness..."
+  Endif  
+  
+  'detection methods
+  If rbGPIO.Value Then
+    If Exist(strOldRamFile) Then
+      If blnDetection Then    'save previous recording
+        blnDetection = False
+        strDiskFile = AUDIO_PATH & "/" & Format(Now(), "yyyy_mmm_dd_T_hh_nn_ss") & ".wav"
+        'remove unwanted track & trim initial blip
+        Exec ["sox", strOldRamFile, strDiskFile, "remix", "1", "trim", "0.15"] Wait
+        lblStatus.Text = "Recording: " & strDiskFile
+      Endif
+      Kill strOldRamFile
+    Endif
+  Else    'use SoX data (volume)
+    If Exist(strOldRamFile) Then
+      Exec ["sox", strOldRamFile, RAM_PATH & "/" & RAM_FILE_TRIM, "remix", "1", "trim", "0.15"] Wait
+'       Kill strOldRamFile
+      Shell "sox " & RAM_PATH & "/" & RAM_FILE_TRIM & " -n stat -v 2>&1" To strSoxVolume
+      Wait 0.05
+      strSoxVolume = Mid(strSoxVolume, 1, Len(strSoxVolume) - 1)
+      If IsNumber(strSoxVolume) Then
+        If CFloat(strSoxVolume) < SOX_THRESHOLD Then   'save this recording
+          strDiskFile = AUDIO_PATH & "/" & Format(Now(), "yyyy_mmm_dd_T_hh_nn_ss") & ".wav"
+          Exec ["mv", "-n", RAM_PATH & "/" & RAM_FILE_TRIM, strDiskFile]
+'           Kill RAM_PATH & "/" & RAM_FILE_TRIM
+        Endif
+      Endif
+    Endif
+  Endif
+  
+Catch
+  Me.Text = "File error??? " & Error.Text
+  Event(Me.Text)
+End
+
+Public Sub tmrSample_Timer()
+'take frequent samples for bat activity if its night-time
+  Wait
+  If blnNightTime Then
+    SampleFdSignal()
+  Endif
+End
+
+Public Sub tmrNight_Timer()
+'night-time as set by sunset/sunrise controls
+  If Time(Now) >= vbSunset.Value Or Time(Now) <= vbSunrise.Value Then
+    blnNightTime = True
+    lblStatus.Text = "...the time has come!"
+  Else
+    blnNightTime = False
+  Endif
+  imgView.Visible = blnNightTime
+  imgView.ZoomFit()
+  
+End
+
+Public Sub rbGPIO_Click()
+
+  tmrSample.Enabled = True
+
+End
+
+Public Sub rbSoxVolume_Click()
+
+  tmrSample.Enabled = False
+
+End

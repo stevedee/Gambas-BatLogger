@@ -1,0 +1,117 @@
+# Gambas Form File 3.0
+
+{ Form Form
+  MoveScaled(11.1429,11.1429,50,58)
+  Background = &H7F7FFF&
+  Foreground = &H00003F&
+  Icon = Picture["bat.png"]
+  { btnRun Button
+    MoveScaled(26,5,12,5)
+    Text = ("Run/reset")
+  }
+  { lblFreq Label
+    MoveScaled(5,18,42,7)
+    Font = Font["+8"]
+    Foreground = &HFF7F00&
+    Text = ("counts")
+    Alignment = Align.Center
+  }
+  { tmrSample #Timer
+    #MoveScaled(41,29)
+    Delay = 50
+  }
+  { Label3 Label
+    MoveScaled(5,15,25,4)
+    Text = ("counts per sample: live / peak")
+  }
+  { Label4 Label
+    MoveScaled(5,35,12,3)
+    Text = ("Sample time:")
+  }
+  { lblTotalTime Label
+    MoveScaled(19,35,7,3)
+    Text = ("?")
+  }
+  { Label1 Label
+    MoveScaled(5,38,14,4)
+    Text = ("Sample Interval:")
+  }
+  { lblSampleInterval Label
+    MoveScaled(19,38,10,4)
+    Text = ("?")
+  }
+  { lblPkSampleTime Label
+    MoveScaled(29,35,11,3.1429)
+    Text = ("?")
+  }
+  { tmrStopRecorder #Timer
+    #MoveScaled(42,38)
+    Enabled = True
+    Delay = 10000
+  }
+  { lblStatus Label
+    MoveScaled(0,55,24,3)
+    Font = Font["-2"]
+    Background = &HBFBFFF&
+    Foreground = &H000F3F&
+    Text = ("Listening...")
+    Border = Border.Sunken
+  }
+  { lblIntervalPk Label
+    MoveScaled(29,38,11,4)
+    Text = ("?")
+  }
+  { Label2 Label
+    MoveScaled(5,26,17,4)
+    Text = ("Threshold count:")
+  }
+  { slBoxThreshold SliderBox
+    MoveScaled(6,29,32,4)
+    Foreground = Color.TextForeground
+    MinValue = 5
+    MaxValue = 300
+    Value = 50
+  }
+  { Label5 Label
+    MoveScaled(5,43,11,4)
+    Text = ("Sunset")
+  }
+  { Label6 Label
+    MoveScaled(5,47,11,4)
+    Text = ("Sunrise")
+  }
+  { vbSunset ValueBox
+    MoveScaled(17,44,11,3)
+    Foreground = Color.Foreground
+    Text = ("ValueBox1")
+    Type = ValueBox.Time
+    Value = "20:00"
+  }
+  { vbSunrise ValueBox
+    MoveScaled(17,48,11,3)
+    Foreground = &H003F00&
+    Text = ("ValueBox2")
+    Type = ValueBox.Time
+    Value = "06:00"
+  }
+  { tmrNight #Timer
+    #MoveScaled(41,49)
+    Enabled = True
+    Delay = 20000
+  }
+  { imgView ImageView
+    MoveScaled(31,44,8,8)
+  }
+  { Frame1 Frame
+    MoveScaled(5,2,18,11)
+    Text = ("detection method")
+    { rbGPIO RadioButton
+      MoveScaled(0,3,17.1429,4)
+      Text = ("freq div > gpio")
+    }
+    { rbSoxVolume RadioButton
+      MoveScaled(0,7,17.1429,4)
+      Text = ("SoX volume")
+    }
+  }
+}
